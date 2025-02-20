@@ -7,29 +7,23 @@ type Callback<T> = Types.Callback<T>
 type Signal<T...> = Types.Signal<T...>
 type Connection = Types.Connection
 
+local State = require(script.Parent.State)
+
+local ObserveValue = State.Value
+local ObserveDistinctArray = State.DistinctArray
+
 --[=[
     Observe a signal and call a handler with whatever value the signal passes to it.
 ]=]
 local function ObserveChangedSignal<T>(value: T, changed: Signal<T>, fn: Handler<T>): Cleanup
-    -- Initially call the handler with the current value
-    local cleanup = fn(value)
-
-    local function onChanged(newValue)
-        if cleanup then
-            cleanup()
-        end
-        
-        cleanup = fn(newValue)
-    end
+    local cleanup, onChanged = ObserveValue(value, fn)
 
     local connection = changed:Connect(onChanged)
 
     return function()
         connection:Disconnect()
 
-        if cleanup then
-            cleanup()
-        end
+        cleanup()
     end
 end
 
@@ -37,7 +31,6 @@ end
     Observe a set and clear signal and call a handler with whatever value the set signal passes to it.
     If the clear signal is fired, the handler will be called with nil.
 ]=]
-
 local function ObserveSetClearSignals<T>(value: T, set: Signal<T>, clear: Signal<any>, fn: Handler<T?>): Cleanup
     -- Initially call the handler with the current value
     local cleanup = fn(value)
@@ -72,34 +65,12 @@ local function ObserveSetClearSignals<T>(value: T, set: Signal<T>, clear: Signal
 end
 
 --[=[
-    Observe an added and removed signal and call a handler any time a value is added.
-    The handler will be called with all values that are added.
+    Observe an added and removed signal and call a handler any time a distinct value is added.
+    The handler will be called with all distinct values that are added.
     When a value is removed, the associated cleanup will be called.
 ]=]
 function ObserveAddedRemovedSignals<T>(values: {T}, added: Signal<T>, removed: Signal<T>, fn: Handler<T>): Cleanup
-    local cleanups = {}
-
-    local function onAdded(value)
-        if cleanups[value] then
-            return
-        end
-
-        cleanups[value] = fn(value)
-    end
-
-    local function onRemoved(value)
-        local cleanup = cleanups[value]
-
-        if cleanup then
-            cleanup()
-            cleanups[value] = nil
-        end
-    end
-
-    -- Initially call the handler with each current value
-    for _, value in values do
-        cleanups[value] = fn(value)
-    end
+    local cleanup, onAdded, onRemoved = ObserveDistinctArray(values, fn)
 
     -- Connect the signals
     local addedConnection = added:Connect(onAdded)
@@ -109,9 +80,7 @@ function ObserveAddedRemovedSignals<T>(values: {T}, added: Signal<T>, removed: S
         addedConnection:Disconnect()
         removedConnection:Disconnect()
 
-        for _, cleanup in cleanups do
-            cleanup()
-        end
+        cleanup()
     end
 end
 
